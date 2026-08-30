@@ -30,3 +30,6 @@ dist
 
 # 課程教材 skill（來源 uopsdod/claude-2-flight-price-notifier），本機用、不進版控
 .claude/
+
+# Lambda build artifacts
+aws/build/
