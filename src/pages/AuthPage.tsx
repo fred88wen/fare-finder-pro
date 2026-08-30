@@ -1,42 +1,36 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+
 import { supabase } from "@/integrations/supabase/client";
+import { useDocumentMeta } from "@/lib/document-meta";
 
-export const Route = createFileRoute("/auth")({
-  head: () => ({
-    meta: [
-      { title: "Sign in — Flight Price Notifier" },
-      {
-        name: "description",
-        content: "Sign in to manage your fare alerts. 登入以管理你的機票降價通知。",
-      },
-      { property: "og:title", content: "Sign in — Flight Price Notifier" },
-      {
-        property: "og:description",
-        content: "Sign in to manage your fare alerts. 登入以管理你的機票降價通知。",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-    ],
-  }),
-  component: AuthPage,
-});
+type Mode = "sign-in" | "sign-up";
 
-function AuthPage() {
+export default function AuthPage({ mode }: { mode: Mode }) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  useDocumentMeta({
+    title: "Sign in — Flight Price Notifier",
+    description: "Sign in to manage your fare alerts. 登入以管理你的機票降價通知。",
+  });
+
   // Already signed in? Go straight to the dashboard.
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/dashboard", replace: true });
+      if (data.session) navigate("/app", { replace: true });
     });
   }, [navigate]);
+
+  // Clear transient messages when switching between /sign-in and /sign-up.
+  useEffect(() => {
+    setError(null);
+    setNotice(null);
+  }, [mode]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -50,7 +44,7 @@ function AuthPage() {
           password,
         });
         if (signInError) throw signInError;
-        navigate({ to: "/dashboard" });
+        navigate("/app");
       } else {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
@@ -59,7 +53,7 @@ function AuthPage() {
         });
         if (signUpError) throw signUpError;
         if (data.session) {
-          navigate({ to: "/dashboard" });
+          navigate("/app");
         } else {
           setNotice("帳號已建立!請到信箱點擊確認連結後再登入。");
         }
@@ -159,19 +153,12 @@ function AuthPage() {
             </button>
           </form>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === "sign-in" ? "sign-up" : "sign-in");
-              setError(null);
-              setNotice(null);
-            }}
-            className="mt-6 w-full text-center text-sm font-medium text-primary transition-colors hover:text-primary/80"
+          <Link
+            to={mode === "sign-in" ? "/sign-up" : "/sign-in"}
+            className="mt-6 block w-full text-center text-sm font-medium text-primary transition-colors hover:text-primary/80"
           >
-            {mode === "sign-in"
-              ? "No account yet? Create one"
-              : "Already have an account? Sign in"}
-          </button>
+            {mode === "sign-in" ? "No account yet? Create one" : "Already have an account? Sign in"}
+          </Link>
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">

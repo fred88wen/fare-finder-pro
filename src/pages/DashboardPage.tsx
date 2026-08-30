@@ -1,24 +1,22 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "react-router-dom";
+
+import { useAuthedUser } from "@/components/RequireAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { useDocumentMeta } from "@/lib/document-meta";
 
-export const Route = createFileRoute("/_authenticated/dashboard")({
-  head: () => ({
-    meta: [
-      { title: "Dashboard — Flight Price Notifier" },
-      { name: "description", content: "Manage your fare alerts." },
-      { name: "robots", content: "noindex" },
-    ],
-  }),
-  component: DashboardPage,
-});
-
-function DashboardPage() {
-  const { user } = Route.useRouteContext() as { user: { email?: string } };
+export default function DashboardPage() {
+  const user = useAuthedUser();
   const navigate = useNavigate();
+
+  useDocumentMeta({
+    title: "Dashboard — Flight Price Notifier",
+    description: "Manage your fare alerts.",
+    robots: "noindex",
+  });
 
   async function handleSignOut() {
     await supabase.auth.signOut();
-    navigate({ to: "/" });
+    navigate("/");
   }
 
   return (
@@ -50,12 +48,10 @@ function DashboardPage() {
 
         <div className="mt-12 rounded-2xl border border-dashed border-border bg-card/60 p-12">
           <div className="text-4xl">🔔</div>
-          <h2 className="mt-4 text-lg font-bold text-card-foreground">
-            航線訂閱功能即將推出
-          </h2>
+          <h2 className="mt-4 text-lg font-bold text-card-foreground">航線訂閱功能即將推出</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-            Route subscriptions, target prices, and fare tracking are coming in the next
-            milestone. 很快就能在這裡設定你想追蹤的航線與目標價。
+            Route subscriptions, target prices, and fare tracking are coming in the next milestone.
+            很快就能在這裡設定你想追蹤的航線與目標價。
           </p>
         </div>
       </main>

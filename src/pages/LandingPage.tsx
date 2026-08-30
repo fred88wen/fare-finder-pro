@@ -1,27 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { Link } from "react-router-dom";
 
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Flight Price Notifier — 機票降價通知" },
-      {
-        name: "description",
-        content:
-          "設定航線與目標價,機票降價就通知你。Set a route and a target price — we email you when the fare drops.",
-      },
-      { property: "og:title", content: "Flight Price Notifier — 機票降價通知" },
-      {
-        property: "og:description",
-        content:
-          "設定航線與目標價,機票降價就通知你。Set a route and a target price — we email you when the fare drops.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
-  component: LandingPage,
-});
+import { useDocumentMeta } from "@/lib/document-meta";
 
 function useScrollReveal() {
   useEffect(() => {
@@ -66,7 +46,12 @@ const features = [
   },
 ];
 
-function LandingPage() {
+export default function LandingPage() {
+  useDocumentMeta({
+    title: "Flight Price Notifier — 機票降價通知",
+    description:
+      "設定航線與目標價,機票降價就通知你。Set a route and a target price — we email you when the fare drops.",
+  });
   useScrollReveal();
 
   return (
@@ -83,7 +68,7 @@ function LandingPage() {
           </span>
         </Link>
         <Link
-          to="/auth"
+          to="/sign-in"
           className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:bg-primary/90 hover:shadow-primary/40"
         >
           Sign in / 登入
@@ -111,7 +96,7 @@ function LandingPage() {
 
           <div className="reveal reveal-delay-3 mt-10">
             <Link
-              to="/auth"
+              to="/sign-in"
               className="inline-flex items-center justify-center rounded-xl bg-primary px-8 py-3.5 text-base font-semibold text-primary-foreground shadow-xl shadow-primary/30 transition-all hover:scale-[1.02] hover:bg-primary/90 hover:shadow-primary/50"
             >
               Sign in / 登入

@@ -66,11 +66,45 @@ Continue developing this project in the [Lovable editor](https://lovable.dev/pro
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Node.js 20+ and npm.
 
 ```sh
 git clone <this-repository-url>
-cd <repository-name>
+cd fare-finder-pro
 npm i
-npm run dev
+npm run dev        # http://localhost:8080
+npm run build      # static SPA -> dist/
+npm run preview    # serve dist/ locally with SPA fallback
 ```
+
+### Stack
+
+Plain **Vite + React 19 SPA** — no SSR, no server runtime. Routing is
+client-side via **React Router**:
+
+| Path | Page |
+| --- | --- |
+| `/` | Landing page |
+| `/sign-in` | Sign in (Supabase email/password) |
+| `/sign-up` | Sign up |
+| `/app` | Dashboard (requires a session; otherwise redirects to `/sign-in`) |
+| `/auth`, `/dashboard` | Legacy paths, redirect to `/sign-in` / `/app` |
+
+Source layout: `index.html` -> `src/main.tsx` -> `src/App.tsx` (routes),
+pages in `src/pages/`, route guard in `src/components/RequireAuth.tsx`.
+
+### Deploying to Vercel
+
+Import the repo; `vercel.json` pins the framework (`vite`), build command
+(`npm run build`), output directory (`dist`) and the SPA fallback rewrite that
+makes deep links such as `/app` resolve client-side.
+
+Environment variables (Project Settings -> Environment Variables):
+
+| Name | Value |
+| --- | --- |
+| `VITE_SUPABASE_URL` | your Supabase project URL |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | the publishable (anon) key |
+
+Both are inlined at build time, so changing them requires a redeploy. Only
+`VITE_*` variables reach the browser bundle — never put a service-role key here.
