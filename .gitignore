@@ -10,6 +10,11 @@ lerna-debug.log*
 node_modules
 dist
 .vercel
+
+# Local env — real values stay out of git; see .env.example
+.env
+.env.local
+.env.*.local
 *.local
 
 # Editor directories and files
