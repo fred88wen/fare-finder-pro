@@ -9,6 +9,8 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+from subscription_gate import gate
+
 UA = "Mozilla/5.0 (compatible; flight-notifier/1.0)"
 QUEUE_NAME = os.environ.get("FARE_QUEUE", "flight-fare-queue")
 
@@ -90,8 +92,23 @@ def handler(event, context):
     us = fetch_cheapest(origin, destination, month, token, "usd")
 
     rows = _table.scan(FilterExpression=Attr("route").eq(route)).get("Items", [])
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     matched = 0
+    skipped = 0
     for it in rows:
+        # M2 paywall: serve active + cancelled-in-grace; lazily retire lapsed rows.
+        serve, expire, why = gate(it, now)
+        if expire:
+            _table.update_item(
+                Key={"email": it["email"], "route": it["route"]},
+                UpdateExpression="SET subscription_status = :s, updated_at = :n",
+                ExpressionAttributeValues={":s": "expired", ":n": now},
+            )
+            print("expired grace-lapsed row", it["email"], route, why)
+        if not serve:
+            skipped += 1
+            print("skipped (not paid)", it["email"], route, why)
+            continue
         tp = it.get("target_price")
         if tp is None:
             continue
@@ -122,5 +139,8 @@ def handler(event, context):
         matched += 1
         print("enqueued match", it["email"], route, tw["price"], "<=", int(Decimal(str(tp))))
 
-    print("%s scanned %d subscriber(s), matched %d" % (route, len(rows), matched))
+    print(
+        "%s scanned %d subscriber(s), %d unpaid/skipped, matched %d"
+        % (route, len(rows), skipped, matched)
+    )
     return {"ok": True, "route": route, "matched": matched, "cheapest_twd": tw["price"]}

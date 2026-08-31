@@ -33,3 +33,7 @@ dist
 
 # Lambda build artifacts
 aws/build/
+
+# Lambda 本機快取與 IAM policy 備份
+__pycache__/
+aws/backups/

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PlanCard } from "@/components/PlanCard";
 import { useAuthedUser } from "@/components/RequireAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useDocumentMeta } from "@/lib/document-meta";
-import { listSubscriptions, PLANS, saveSubscription, type Subscription } from "@/lib/flight-api";
+import {
+  cancelSubscription,
+  goToCheckout,
+  listSubscriptions,
+  PLANS,
+  saveSubscription,
+  type Subscription,
+} from "@/lib/flight-api";
 
 export default function DashboardPage() {
   const user = useAuthedUser();
@@ -21,8 +28,10 @@ export default function DashboardPage() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingPlan, setSavingPlan] = useState<string | null>(null);
+  const [cancellingRoute, setCancellingRoute] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const refresh = useCallback(async () => {
     if (!email) return;
@@ -40,11 +49,35 @@ export default function DashboardPage() {
     void refresh();
   }, [refresh]);
 
+  // ECPay returns the browser through the /ecpay-result redirect Lambda. The row is
+  // activated by the S2S ReturnURL callback, not here — this only shows the outcome
+  // and re-reads the row (the callback usually lands first, but may take a moment).
+  useEffect(() => {
+    const purchase = searchParams.get("purchase");
+    if (!purchase) return;
+    if (purchase === "success") {
+      setNotice("付款完成！訂閱啟用中，稍候幾秒重新整理即可看到「已訂閱」。");
+      const timer = setTimeout(() => void refresh(), 4000);
+      searchParams.delete("purchase");
+      setSearchParams(searchParams, { replace: true });
+      return () => clearTimeout(timer);
+    }
+    setError("付款未完成，可以再試一次。");
+    searchParams.delete("purchase");
+    setSearchParams(searchParams, { replace: true });
+    return undefined;
+  }, [searchParams, setSearchParams, refresh]);
+
   async function handleSubscribe(planName: "tokyo" | "seoul", targetPrice: number) {
     setSavingPlan(planName);
     setNotice(null);
     try {
-      const saved = await saveSubscription({ email, planName, targetPrice });
+      const result = await saveSubscription({ email, planName, targetPrice });
+      if (result.kind === "checkout") {
+        goToCheckout(result.html); // leaves this page for ECPay's cashier
+        return;
+      }
+      const saved = result.subscription;
       setSubscriptions((rows) => [
         ...rows.filter((row) => row.route !== saved.route),
         { ...saved } as Subscription,
@@ -56,6 +89,24 @@ export default function DashboardPage() {
       setError(err instanceof Error ? err.message : "儲存失敗");
     } finally {
       setSavingPlan(null);
+    }
+  }
+
+  async function handleCancel(route: string) {
+    if (!window.confirm("取消後不再自動續扣，本期到期前仍會收到降價通知。確定取消訂閱？")) return;
+    setCancellingRoute(route);
+    setNotice(null);
+    try {
+      const cancelled = await cancelSubscription({ email, route });
+      setNotice(
+        `已取消 ${route} 的自動續訂，${cancelled.current_period_end_date ?? "本期結束"} 前仍會通知你。`,
+      );
+      setError(null);
+      void refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取消失敗");
+    } finally {
+      setCancellingRoute(null);
     }
   }
 
@@ -94,6 +145,9 @@ export default function DashboardPage() {
           <p className="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">
             選一條航線、設一個目標價。每 30 分鐘自動抓最低票價，低於目標價就寄信通知你。
           </p>
+          <p className="mx-auto mt-2 max-w-lg text-xs text-muted-foreground">
+            月費 NT$300，綠界信用卡定期定額，隨時可取消；取消後本期到期前仍照常通知。
+          </p>
         </div>
 
         {error && (
@@ -114,7 +168,9 @@ export default function DashboardPage() {
               plan={plan}
               subscription={subscriptions.find((row) => row.route === plan.route)}
               saving={savingPlan === plan.planName}
+              cancelling={cancellingRoute === plan.route}
               onSubscribe={(targetPrice) => void handleSubscribe(plan.planName, targetPrice)}
+              onCancel={() => void handleCancel(plan.route)}
             />
           ))}
         </div>
