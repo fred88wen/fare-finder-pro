@@ -128,7 +128,10 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="relative z-10 border-t border-border py-8 text-center text-sm text-muted-foreground">
-        © 2026 Flight Price Notifier
+        <p>© 2026 Flight Price Notifier</p>
+        <p className="mt-2">
+          客服信箱：fred88wen@gmail.com　·　客服電話：0906-680082
+        </p>
       </footer>
     </div>
   );

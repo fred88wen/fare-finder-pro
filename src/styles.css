@@ -38,26 +38,26 @@
   --font-family-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
 
-  /* Near-black violet-tinted dark theme */
-  --background: oklch(0.13 0.015 290);
-  --foreground: oklch(0.96 0.01 290);
-  --card: oklch(0.17 0.02 290);
-  --card-foreground: oklch(0.96 0.01 290);
-  --popover: oklch(0.17 0.02 290);
-  --popover-foreground: oklch(0.96 0.01 290);
-  --primary: oklch(0.62 0.22 293);
-  --primary-foreground: oklch(0.98 0.005 293);
-  --secondary: oklch(0.21 0.025 290);
-  --secondary-foreground: oklch(0.9 0.02 293);
-  --muted: oklch(0.21 0.025 290);
-  --muted-foreground: oklch(0.65 0.03 290);
-  --accent: oklch(0.24 0.05 293);
-  --accent-foreground: oklch(0.95 0.02 293);
+  /* goboss.tw light theme (source: writing/scripts/design/tokens.json) */
+  --background: #F8F8F6;
+  --foreground: #343434;
+  --card: #FFFFFF;
+  --card-foreground: #343434;
+  --popover: #FFFFFF;
+  --popover-foreground: #343434;
+  --primary: #EDAA4C;
+  --primary-foreground: #1B2D42;
+  --secondary: #55C8F1;
+  --secondary-foreground: #1B2D42;
+  --muted: #EFEFEC;
+  --muted-foreground: #6B7280;
+  --accent: #FBF2E7;
+  --accent-foreground: #1B2D42;
   --destructive: oklch(0.6 0.22 25);
   --destructive-foreground: oklch(0.98 0.005 25);
-  --border: oklch(0.26 0.03 290);
-  --input: oklch(0.28 0.03 290);
-  --ring: oklch(0.62 0.22 293);
+  --border: #E4E4E0;
+  --input: #E4E4E0;
+  --ring: #55C8F1;
 }
 
 @layer base {
@@ -108,7 +108,7 @@
   transition-delay: 0.3s;
 }
 
-/* Soft violet glow used behind hero elements */
+/* Soft sky-blue glow used behind hero elements */
 @utility glow-orb {
   position: absolute;
   border-radius: 9999px;
@@ -116,7 +116,7 @@
   pointer-events: none;
   background: radial-gradient(
     circle,
-    oklch(0.62 0.22 293 / 0.35),
+    rgba(85, 200, 241, 0.12),
     transparent 70%
   );
 }
