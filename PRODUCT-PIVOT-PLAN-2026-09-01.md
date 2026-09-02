@@ -11,7 +11,7 @@
 | 4 | fare_notification 兩套新信件文案 | ✅ 完成 | 舊 price-drop dedup（`should_send`）改成扁平 floor-based dedup（`should_send_floor`），兩套模板 subject/render_text/render_html（commit `e8556cc`）|
 | 5 | aws/tests/ 補 parser 分支測試 | ✅ 完成 | 新增 `aws/tests/test_parser_checks.py`（24 項全綠）；順手把 `parser/index.py` 的 `import boto3` 改延遲載入，比照 `ecpay_common.py` 既有慣例，讓純邏輯測試不需要本機裝 boto3（commit `8665f91`）|
 | 6 | 本機假資料測 uptime/domain_expiry | ✅ 完成 | 詳見下方「.tw RDAP 已知限制」——過程中發現並修復一個真 bug（DNS 查詢失敗被誤標成 SSRF 封鎖，commit `3cf1817`），並確認 `.tw` 網域到期查詢系統性失敗 |
-| 7 | 部署 + cache-bust 驗證 | ⏳ 進行中 | — |
+| 7 | 部署 + cache-bust 驗證 | ✅ 完成 | 4支 Lambda（`flight-save-subscription`/`flight-parser`/`flight-parser-wrapper`/`flight-fare-notification`）`update-function-code` 上線；前端 `git push`（commit `96d176b`→`f679364`）觸發 Vercel 自動部署。Read-back：①實測 invoke `flight-parser-wrapper` 對真實 DynamoDB 資料——掃到 2 筆舊版機票測試列，正確判斷無 `check_type` 而跳過，fanned out 0（不會誤觸發）②cache-bust curl `fly.goboss.tw` 確認 `<title>`/og:title/meta description 全部是新版文案。過程中發現 `index.html` 靜態 `<title>`/`<meta>` 沒跟著步驟1一起改（ECPay審核與社群分享爬蟲看的是這份，不是 JS 動態注入的），已補上並重新部署驗證（commit `f679364`）|
 
 **新發現、本次規劃書未列的斷點（已詢問使用者，決定先不動）**：`src/pages/DashboardPage.tsx`（登入後訂閱管理頁）仍是機票版表單（`plan_name` tokyo/seoul、`target_price`），與後端新的 `target`/`check_type`/`threshold` 契約不一致，會導致既有訂閱者的 Dashboard 提交失敗。範圍比步驟1的 LandingPage 大（新表單欄位＋訂閱列表渲染邏輯都要重寫），使用者選擇留到下次 session 再處理，不併入本次。
 
