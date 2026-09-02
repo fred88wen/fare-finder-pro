@@ -2,14 +2,19 @@
 
 M2: the row is born as `pending_payment`; only the ECPay callbacks write `active`
 (ecpay-best-practice Rule 1). Returns an auto-submit HTML form (text/html) for a
-new/unpaid subscriber, or JSON for an in-place target-price update of a paying one.
+new/unpaid subscriber, or JSON for an in-place target update of a paying one.
+
+Product pivot (2026-09-01): subscriptions are now "uptime" or "domain_expiry"
+checks on a `target` (URL or domain), not flight routes. The DynamoDB sort key
+attribute is still physically named `route` (table schema unchanged per the
+pivot plan) — its value is now the target string itself, reused as the ECPay
+CustomField2 join key so the ECPay callback Lambdas need no changes.
 """
 import html
 import json
 import os
 import random
 import time
-from decimal import Decimal, InvalidOperation
 
 import boto3
 
@@ -22,10 +27,8 @@ from ecpay_common import (
     API_BASE,
 )
 
-PLANS = {
-    "tokyo": {"origin": "TPE", "destination": "TYO"},
-    "seoul": {"origin": "TPE", "destination": "SEL"},
-}
+CHECK_TYPES = {"uptime", "domain_expiry"}
+PLAN_LABEL = "網站健康監控月費"
 
 # Monthly: Frequency=1 every PeriodType. ExecTimes is a COUNT, 999 = "effectively
 # long-term" (Rule 6). PERIOD_TYPE=D/ExecTimes=2 via env is the renewal test path.
@@ -69,7 +72,7 @@ def new_trade_no():
     return "FPN%s%04X" % (time.strftime("%y%m%d%H%M%S", time.gmtime()), random.randrange(0x10000))
 
 
-def checkout_params(cfg, trade_no, email, route, plan_label):
+def checkout_params(cfg, trade_no, email, route):
     amount = cfg["amount"]
     params = {
         "MerchantID": cfg["merchant_id"],
@@ -77,8 +80,8 @@ def checkout_params(cfg, trade_no, email, route, plan_label):
         "MerchantTradeDate": taipei_trade_date(),
         "PaymentType": "aio",
         "TotalAmount": amount,
-        "TradeDesc": "Flight fare alert monthly plan",
-        "ItemName": "%s 降價通知月費" % plan_label,
+        "TradeDesc": "Site monitoring monthly plan",
+        "ItemName": PLAN_LABEL,
         "ReturnURL": "%s/ecpay-return" % API_BASE,
         "PeriodReturnURL": "%s/ecpay-period" % API_BASE,
         "OrderResultURL": "%s/ecpay-result" % API_BASE,
@@ -119,22 +122,30 @@ def handler(event, context):
         return _resp(400, {"error": "invalid JSON body"})
 
     email = (body.get("email") or "").strip().lower()
-    plan_name = (body.get("plan_name") or "").strip().lower()
-    raw_price = body.get("target_price")
+    check_type = (body.get("check_type") or "").strip().lower()
+    target = (body.get("target") or "").strip()
+    raw_threshold = body.get("threshold")
 
     if not email or "@" not in email:
         return _resp(400, {"error": "email is required"})
-    if plan_name not in PLANS:
-        return _resp(400, {"error": "plan_name must be one of %s" % sorted(PLANS)})
-    try:
-        target_price = Decimal(str(raw_price))
-    except (InvalidOperation, TypeError):
-        return _resp(400, {"error": "target_price must be a number"})
-    if target_price <= 0:
-        return _resp(400, {"error": "target_price must be positive"})
+    if check_type not in CHECK_TYPES:
+        return _resp(400, {"error": "check_type must be one of %s" % sorted(CHECK_TYPES)})
+    if not target:
+        return _resp(400, {"error": "target is required"})
 
-    plan = PLANS[plan_name]
-    route = "%s-%s" % (plan["origin"], plan["destination"])
+    threshold = None
+    if check_type == "domain_expiry":
+        # required: how many days before expiry to alert (30/14/7/1 recommended)
+        try:
+            threshold = int(raw_threshold)
+        except (TypeError, ValueError):
+            return _resp(400, {"error": "threshold (days) is required for domain_expiry"})
+        if threshold <= 0:
+            return _resp(400, {"error": "threshold must be a positive integer"})
+
+    # route == target: the DynamoDB sort key attribute keeps its old name so the
+    # ECPay callback Lambdas (Key={"email","route"}) need no changes.
+    route = target
     now = now_ts()
 
     existing = TABLE.get_item(Key={"email": email, "route": route}).get("Item") or {}
@@ -142,24 +153,28 @@ def handler(event, context):
     period_end = existing.get("current_period_end") or ""
 
     # Idempotency: never knock a paying subscriber back to pending_payment.
-    # active, or cancelled-but-still-in-grace -> in-place target update, no re-payment.
+    # active, or cancelled-but-still-in-grace -> in-place update, no re-payment.
     if status == "active" or (status == "cancelled" and period_end and period_end >= now):
+        update_expr = "SET target = :t, check_type = :c, updated_at = :u"
+        expr_values = {":t": target, ":c": check_type, ":u": now}
+        if threshold is not None:
+            update_expr += ", threshold = :h"
+            expr_values[":h"] = threshold
         TABLE.update_item(
             Key={"email": email, "route": route},
-            UpdateExpression="SET target_price = :p, plan_name = :n, updated_at = :u",
-            ExpressionAttributeValues={":p": target_price, ":n": plan_name, ":u": now},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values,
         )
-        print("in-place target update", email, route, int(target_price), status)
+        print("in-place target update", email, route, check_type, status)
         return _resp(
             200,
             {
                 "ok": True,
                 "updated_in_place": True,
                 "email": email,
-                "route": route,
-                "plan_name": plan_name,
-                "target_price": int(target_price),
-                "currency": "TWD",
+                "target": target,
+                "check_type": check_type,
+                "threshold": threshold,
                 "subscription_status": status,
                 "current_period_end": period_end or None,
             },
@@ -170,11 +185,8 @@ def handler(event, context):
     item = {
         "email": email,
         "route": route,
-        "plan_name": plan_name,
-        "origin": plan["origin"],
-        "destination": plan["destination"],
-        "target_price": target_price,
-        "currency": "TWD",
+        "target": target,
+        "check_type": check_type,
         "created_at": existing.get("created_at") or now,
         "updated_at": now,
         "subscription_status": "pending_payment",
@@ -183,8 +195,10 @@ def handler(event, context):
         "period_type": PERIOD_TYPE,
         "period_frequency": PERIOD_FREQUENCY,
     }
+    if threshold is not None:
+        item["threshold"] = threshold
     TABLE.put_item(Item=item)
-    print("saved pending_payment", email, route, int(target_price), trade_no)
+    print("saved pending_payment", email, route, check_type, trade_no)
 
-    params = checkout_params(cfg, trade_no, email, route, plan_name)
+    params = checkout_params(cfg, trade_no, email, route)
     return _html_resp(auto_submit_form(cashier_url(cfg), params))
