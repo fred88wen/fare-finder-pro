@@ -54,19 +54,30 @@ def normalize_url(target):
     return target
 
 
-def is_safe_host(hostname):
-    """Blocks loopback/private/link-local targets — a paying subscriber's `target`
-    is otherwise arbitrary attacker-controlled input that this Lambda then fetches
-    (classic SSRF shape)."""
-    if not hostname or hostname.lower() in _BLOCKED_HOSTNAMES:
-        return False
+def resolve_host_ips(hostname):
+    """-> list[str] of resolved IP literals, or None if DNS lookup failed. Kept
+    separate from is_safe_host() because a DNS failure means "site is down"
+    (report it as such), not "we blocked it"."""
     try:
         infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
+        return None
+    return [info[4][0] for info in infos]
+
+
+def is_safe_host(hostname):
+    """Blocks loopback/private/link-local targets — a paying subscriber's `target`
+    is otherwise arbitrary attacker-controlled input that this Lambda then fetches
+    (classic SSRF shape). Assumes DNS already resolved; call resolve_host_ips()
+    first and handle a None result (DNS failure) separately."""
+    if not hostname or hostname.lower() in _BLOCKED_HOSTNAMES:
         return False
-    for info in infos:
+    ips = resolve_host_ips(hostname)
+    if ips is None:
+        return False
+    for raw_ip in ips:
         try:
-            ip = ipaddress.ip_address(info[4][0])
+            ip = ipaddress.ip_address(raw_ip)
         except ValueError:
             return False
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
@@ -80,6 +91,8 @@ def check_uptime(target):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return False, None, "invalid target URL"
+    if resolve_host_ips(parsed.hostname) is None:
+        return False, None, "DNS lookup failed"
     if not is_safe_host(parsed.hostname):
         return False, None, "target host not allowed"
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*"})

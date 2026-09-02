@@ -20,6 +20,7 @@ from index import (  # noqa: E402
     is_safe_host,
     normalize_url,
     parse_rdap_expiry,
+    resolve_host_ips,
 )
 
 FAILS = []
@@ -50,6 +51,14 @@ def test_is_safe_host():
     check("localhost name blocked", not is_safe_host("localhost"))
     check("empty hostname blocked", not is_safe_host(""))
     check("public IP allowed", is_safe_host("8.8.8.8"))
+
+
+def test_resolve_host_ips():
+    check("IP literal resolves to itself", resolve_host_ips("8.8.8.8") == ["8.8.8.8"])
+    check(
+        "nonexistent domain -> None, not an exception",
+        resolve_host_ips("this-domain-should-not-exist-abcxyz999.invalid") is None,
+    )
 
 
 # --- domain_from_target --------------------------------------------------------------
@@ -95,6 +104,7 @@ def test_domain_expiry_should_alert():
 if __name__ == "__main__":
     test_normalize_url()
     test_is_safe_host()
+    test_resolve_host_ips()
     test_domain_from_target()
     test_parse_rdap_expiry()
     test_domain_expiry_should_alert()
