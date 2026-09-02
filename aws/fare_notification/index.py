@@ -1,27 +1,25 @@
 # -*- coding: utf-8 -*-
-"""flight-fare-notification — SQS consumer: dedup against notification_history, then email via Resend."""
+"""site-watch-notification — SQS consumer: dedup against notification_history, then email via Resend.
+
+Product pivot (2026-09-01): messages are now "uptime" or "domain_expiry" alerts
+(see aws/parser/index.py), not flight fare drops. Dedup is now a flat re-alert
+floor (no price-drop-magnitude override — there's no magnitude for "site is
+down"), so both check types share `should_send_floor()`.
+"""
 import datetime
+import html
 import json
 import os
 import urllib.error
 import urllib.request
-from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
-UA = "Mozilla/5.0 (compatible; flight-notifier/1.0)"
+UA = "Mozilla/5.0 (compatible; site-watch/1.0)"
 RESEND_URL = "https://api.resend.com/emails"
 
 FLOOR_HOURS = float(os.environ.get("NOTIFY_FLOOR_HOURS", "24"))
-REALERT_PCT = float(os.environ.get("REALERT_PCT", "20"))
-REALERT_ABS_TWD = float(os.environ.get("REALERT_ABS_TWD", "2000"))
-
-CITY = {
-    "TPE": "台北",
-    "TYO": "東京",
-    "SEL": "首爾",
-}
 
 _sm = boto3.client("secretsmanager")
 _history = boto3.resource("dynamodb").Table("notification_history")
@@ -36,110 +34,79 @@ def resend_secret():
     return _secret_cache
 
 
-def travelpayouts_marker():
-    try:
-        raw = _sm.get_secret_value(SecretId="flight/travelpayouts")["SecretString"]
-        return json.loads(raw).get("marker")
-    except Exception:  # marker is optional — never block a send on it
-        return None
+# --------------------------------------------------------------------------- uptime template
+def subject_uptime(target):
+    return "🔴 網站無法連線：%s" % target
 
 
-def route_label(route):
-    parts = route.split("-")
-    if len(parts) != 2:
-        return route
-    return "%s → %s" % (CITY.get(parts[0], parts[0]), CITY.get(parts[1], parts[1]))
+def status_detail(status_code, error):
+    if status_code:
+        return "HTTP %s" % status_code
+    return error or "連線失敗"
 
 
-def ddmm(iso):
-    if not iso:
-        return ""
-    try:
-        return datetime.datetime.strptime(iso[:10], "%Y-%m-%d").strftime("%d%m")
-    except ValueError:
-        return ""
-
-
-def pretty_date(iso):
-    if not iso:
-        return "—"
-    return iso[:10]
-
-
-def money(value):
-    return "{:,}".format(int(round(float(value))))
-
-
-# --------------------------------------------------------------------------- renderer
-def booking_url(fare, route, marker=None):
-    origin, destination = (route.split("-") + ["", ""])[:2]
-    out = ddmm(fare.get("depart_date"))
-    back = ddmm(fare.get("return_date"))
-    path = "%s%s%s%s1" % (origin, out, destination, back)
-    url = "https://www.aviasales.com/search/%s" % path
-    if marker:
-        url += "?marker=%s" % marker
-    return url
-
-
-def subject(fare, route):
-    return "✈️ %s 降價通知！NT$%s 已達標" % (route_label(route), money(fare["price"]))
-
-
-def render_text(fare, route, target_price, usd_price=None, link=""):
+def render_text_uptime(target, status_code, error):
     lines = [
-        "%s 目前最便宜來回 NT$%s，已低於你設定的 NT$%s。" % (route_label(route), money(fare["price"]), money(target_price)),
-    ]
-    if usd_price:
-        lines.append("（約 US$%s，供參考）" % money(usd_price))
-    lines += [
+        "你監控的網站 %s 目前無法正常連線。" % target,
         "",
-        "航空公司：%s" % (fare.get("airline") or "—"),
-        "去程：%s" % pretty_date(fare.get("depart_date")),
-        "回程：%s" % pretty_date(fare.get("return_date")),
+        "狀態：%s" % status_detail(status_code, error),
         "",
-        "立即訂購：%s" % link,
-        "",
-        "價格由 Travelpayouts 提供，實際票價以訂購頁面為準。",
+        "我們會持續每 30 分鐘檢查一次，恢復連線後不會再收到此通知。",
     ]
     return "\n".join(lines)
 
 
-def render_html(fare, route, target_price, usd_price=None, link=""):
-    usd_line = ""
-    if usd_price:
-        usd_line = (
-            '<p style="margin:4px 0 0;color:#6b7280;font-size:14px;">約 US$%s（供參考，與 NT$ 為兩次獨立報價）</p>'
-            % money(usd_price)
-        )
+def render_html_uptime(target, status_code, error):
     return (
         '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;'
         'font-size:15px;line-height:1.6;color:#111827;max-width:520px;">'
-        '<p style="margin:0 0 12px;">你追蹤的 <strong>%s</strong> 降價了。</p>'
-        '<p style="margin:0;font-size:28px;font-weight:700;">NT$%s</p>'
-        '%s'
-        '<p style="margin:12px 0 0;">你設定的目標價：NT$%s</p>'
-        '<p style="margin:12px 0 0;">航空公司：%s<br>去程：%s<br>回程：%s</p>'
-        '<p style="margin:24px 0 0;">'
-        '<a href="%s" style="background:#2563eb;color:#ffffff;text-decoration:none;'
-        'padding:12px 22px;border-radius:6px;display:inline-block;font-weight:600;">立即訂購</a></p>'
+        '<p style="margin:0 0 12px;">你監控的網站 <strong>%s</strong> 目前無法正常連線。</p>'
+        '<p style="margin:0;font-size:20px;font-weight:700;color:#dc2626;">%s</p>'
         '<p style="margin:24px 0 0;color:#6b7280;font-size:12px;">'
-        '價格由 Travelpayouts 提供，實際票價以訂購頁面為準。</p>'
+        "我們會持續每 30 分鐘檢查一次，恢復連線後不會再收到此通知。</p>"
         "</div>"
-    ) % (
-        route_label(route),
-        money(fare["price"]),
-        usd_line,
-        money(target_price),
-        fare.get("airline") or "—",
-        pretty_date(fare.get("depart_date")),
-        pretty_date(fare.get("return_date")),
-        link,
-    )
+    ) % (html.escape(target), html.escape(status_detail(status_code, error)))
+
+
+# --------------------------------------------------------------------------- domain_expiry template
+def subject_domain_expiry(target, days_left):
+    if days_left < 0:
+        return "🔴 網域已過期：%s" % target
+    return "🟡 網域即將到期：%s（剩 %d 天）" % (target, days_left)
+
+
+def render_text_domain_expiry(target, days_left, expires_on):
+    if days_left < 0:
+        headline = "%s 已於 %s 到期，請盡快續約，避免網域被釋出搶註。" % (target, expires_on)
+    else:
+        headline = "%s 將於 %s 到期（剩 %d 天），請記得續約。" % (target, expires_on, days_left)
+    return "\n".join([headline, "", "到期日：%s" % expires_on])
+
+
+def render_html_domain_expiry(target, days_left, expires_on):
+    expires_esc = html.escape(expires_on)
+    if days_left < 0:
+        headline = "已於 <strong>%s</strong> 到期，請盡快續約，避免網域被釋出搶註。" % expires_esc
+        color = "#dc2626"
+    else:
+        headline = "將於 <strong>%s</strong> 到期（剩 <strong>%d</strong> 天），請記得續約。" % (expires_esc, days_left)
+        color = "#d97706"
+    return (
+        '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;'
+        'font-size:15px;line-height:1.6;color:#111827;max-width:520px;">'
+        '<p style="margin:0 0 12px;">你監控的網域 <strong>%s</strong> %s</p>'
+        '<p style="margin:24px 0 0;color:%s;font-size:12px;">'
+        "網域到期後可能被任何人搶註，強烈建議提早續約。</p>"
+        "</div>"
+    ) % (html.escape(target), headline, color)
 
 
 # --------------------------------------------------------------------------- dedup
-def should_send(pk, new_price):
+def should_send_floor(pk):
+    """First alert always sends; re-alert only after FLOOR_HOURS since the last
+    one for this (email, target) pair — there's no drop-magnitude override here
+    (unlike the old price-drop notifier) since "down" / "N days left" has no
+    comparable per-message magnitude."""
     rows = _history.query(
         KeyConditionExpression=Key("pk").eq(pk), ScanIndexForward=False, Limit=1
     ).get("Items", [])
@@ -153,20 +120,13 @@ def should_send(pk, new_price):
     age_h = (datetime.datetime.utcnow() - last_at).total_seconds() / 3600.0
     if age_h >= FLOOR_HOURS:
         return True, "last alert %.1fh ago (floor %.0fh)" % (age_h, FLOOR_HOURS)
-    last_price = float(Decimal(str(last.get("price", 0))))
-    if last_price <= 0:
-        return True, "no previous price"
-    if new_price <= last_price * (1 - REALERT_PCT / 100.0):
-        return True, "drop >= %.0f%% vs NT$%s" % (REALERT_PCT, money(last_price))
-    if (last_price - new_price) >= REALERT_ABS_TWD:
-        return True, "drop >= NT$%s vs NT$%s" % (money(REALERT_ABS_TWD), money(last_price))
-    return False, "within %.0fh floor and drop too small (last NT$%s)" % (FLOOR_HOURS, money(last_price))
+    return False, "within %.0fh floor" % FLOOR_HOURS
 
 
 # --------------------------------------------------------------------------- send
-def send_email(to, subj, html, text):
+def send_email(to, subj, body_html, body_text):
     secret = resend_secret()
-    body = {"from": secret["from"], "to": to, "subject": subj, "html": html, "text": text}
+    body = {"from": secret["from"], "to": to, "subject": subj, "html": body_html, "text": body_text}
     req = urllib.request.Request(
         RESEND_URL,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -195,39 +155,48 @@ def send_email(to, subj, html, text):
 def process(msg):
     email = msg["email"]
     route = msg["route"]
-    fare = msg["cheapest"]
-    price = float(Decimal(str(fare["price"])))
-    target_price = float(Decimal(str(msg["target_price"])))
+    check_type = msg.get("check_type")
+    target = msg.get("target", route)
     pk = "%s#%s" % (email, route)
 
-    ok, why = should_send(pk, price)
+    ok, why = should_send_floor(pk)
     if not ok:
         print("skipped (deduped)", pk, why)
         return "skipped"
 
-    usd = (msg.get("cheapest_usd") or {}).get("price")
-    link = booking_url(fare, route, travelpayouts_marker())
-    result = send_email(
-        email,
-        subject(fare, route),
-        render_html(fare, route, target_price, usd, link),
-        render_text(fare, route, target_price, usd, link),
-    )
+    if check_type == "uptime":
+        status_code = msg.get("status_code")
+        error = msg.get("error")
+        subj = subject_uptime(target)
+        body_html = render_html_uptime(target, status_code, error)
+        body_text = render_text_uptime(target, status_code, error)
+        history_extra = {"status": "down"}
+    elif check_type == "domain_expiry":
+        days_left = int(msg.get("days_left", 0))
+        expires_on = msg.get("expires_on", "")
+        subj = subject_domain_expiry(target, days_left)
+        body_html = render_html_domain_expiry(target, days_left, expires_on)
+        body_text = render_text_domain_expiry(target, days_left, expires_on)
+        history_extra = {"days_left": days_left}
+    else:
+        print("unknown check_type", check_type, "- skipping", pk)
+        return "skipped"
+
+    result = send_email(email, subj, body_html, body_text)
     if result == "dropped":
         print("permanent failure — dropping message for", pk)
         return "dropped"
 
-    _history.put_item(
-        Item={
-            "pk": pk,
-            "sent_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "email": email,
-            "route": route,
-            "price": Decimal(str(fare["price"])),
-            "currency": "TWD",
-        }
-    )
-    print("sent alert", pk, "NT$%s" % money(price), "(%s)" % why)
+    item = {
+        "pk": pk,
+        "sent_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "email": email,
+        "route": route,
+        "check_type": check_type,
+    }
+    item.update(history_extra)
+    _history.put_item(Item=item)
+    print("sent alert", pk, check_type, "(%s)" % why)
     return "sent"
 
 
