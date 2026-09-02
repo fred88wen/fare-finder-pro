@@ -8,12 +8,18 @@
 | 2 | save_subscription 欄位改 target/check_type/threshold | ✅ 完成 | 移除 PLANS/target_price；DynamoDB sort key 屬性沿用 `route`，值改存 target 字串，讓 ECPay callback Lambda 不用動（commit `6896653`）|
 | 3 | parser 新增 uptime/domain_expiry 分支 | ✅ 完成 | 取代 `fetch_cheapest()`；uptime 走 HTTP 檢查＋SSRF 防護（擋 loopback/private/link-local host），domain_expiry 走 RDAP；RDAP 查詢失敗時整輪跳過不誤報（commit `191a9c2`）|
 | 補件 | parser_wrapper 改用 DynamoDB distinct target fan-out | ✅ 完成 | 原本讀 S3 `flight-routes.json` 固定清單已與新 schema 不符（會靜默 0 派工），改成掃 `subscriptions` 表算 distinct (target, check_type)，套用 `gate()` 付費閘門後才派工；`build_zips.py` 補 `subscription_gate.py` 依賴（commit `d995e1e`）|
-| 4 | fare_notification 兩套新信件文案 | ⏳ 未開始 | 下次繼續 |
-| 5 | aws/tests/ 補 parser 分支測試 | ⏳ 未開始 | 下次繼續 |
-| 6 | 本機假資料測 uptime/domain_expiry | ⏳ 未開始 | 下次繼續 |
-| 7 | 部署 + cache-bust 驗證 | ⏳ 未開始 | 下次繼續 |
+| 4 | fare_notification 兩套新信件文案 | ✅ 完成 | 舊 price-drop dedup（`should_send`）改成扁平 floor-based dedup（`should_send_floor`），兩套模板 subject/render_text/render_html（commit `e8556cc`）|
+| 5 | aws/tests/ 補 parser 分支測試 | ✅ 完成 | 新增 `aws/tests/test_parser_checks.py`（24 項全綠）；順手把 `parser/index.py` 的 `import boto3` 改延遲載入，比照 `ecpay_common.py` 既有慣例，讓純邏輯測試不需要本機裝 boto3（commit `8665f91`）|
+| 6 | 本機假資料測 uptime/domain_expiry | ✅ 完成 | 詳見下方「.tw RDAP 已知限制」——過程中發現並修復一個真 bug（DNS 查詢失敗被誤標成 SSRF 封鎖，commit `3cf1817`），並確認 `.tw` 網域到期查詢系統性失敗 |
+| 7 | 部署 + cache-bust 驗證 | ⏳ 進行中 | — |
 
 **新發現、本次規劃書未列的斷點（已詢問使用者，決定先不動）**：`src/pages/DashboardPage.tsx`（登入後訂閱管理頁）仍是機票版表單（`plan_name` tokyo/seoul、`target_price`），與後端新的 `target`/`check_type`/`threshold` 契約不一致，會導致既有訂閱者的 Dashboard 提交失敗。範圍比步驟1的 LandingPage 大（新表單欄位＋訂閱列表渲染邏輯都要重寫），使用者選擇留到下次 session 再處理，不併入本次。
+
+**⚠️ 已知限制：`.tw` 網域到期查詢系統性失敗（2026-09-02 實測確認，先接受上線）**
+
+`check_domain_expiry()` 程式邏輯本身正確（`google.com` 實測：正確算出到期天數與日期；不存在網域正確回 404 訊息）。但 `.tw` 網域（IANA bootstrap 唯一登記的 RDAP 伺服器 `ccrdap.twnic.tw`）對任何標準 HTTP/1.1 或自動協商 HTTP/2 的 client 一律回 `HTTP 426`，`rdap.org` 的 bootstrap 代理則是逾時。已排除的假設：UA/Header 偽裝（換完整瀏覽器 header 組合無效）、HTTP/2 協商問題（Node.js `fetch` 自動走 h2 仍 426）、地區/來源 IP 問題（用 WebFetch 從 Anthropic 網路測是 socket 斷線、**部署到真實 AWS us-east-1 Lambda 直接測試仍是 426/timeout，兩種網路結果一致**——已排除「換到 production 網路就會通」的可能）。IANA 官方 bootstrap 沒有列出 `.tw` 的備援 RDAP 伺服器。傳統 WHOIS（port 43）本機被拒但未在 Lambda 測（可作為下次調查方向）。
+
+**影響範圍**：訂閱 `.tw` 網域做 domain_expiry 監控的使用者，目前實質上不會收到到期提醒（系統不會誤報，只是靜默收不到）；.com/.net 等 Verisign 系 gTLD 已驗證正常運作。**決策（2026-09-02）**：先接受此限制上線，待實際觀察訂閱者的網域分佈後再決定是否要修（選項包括：改探付費 WHOIS API 專收失敗的 TLD、或嘗試 Lambda 內測 port 43 WHOIS）。
 
 ---
 
