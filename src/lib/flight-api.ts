@@ -3,36 +3,43 @@ export const FLIGHT_API_BASE =
   import.meta.env["VITE_FLIGHT_API_URL"]?.replace(/\/$/, "") ??
   "https://bmzjswvj8l.execute-api.us-east-1.amazonaws.com";
 
-export type PlanName = "tokyo" | "seoul";
+export type CheckType = "uptime" | "domain_expiry";
 
-export type Plan = {
-  planName: PlanName;
-  label: string;
-  route: string;
-  emoji: string;
-  /** Cheapest fare seen when the plan was set up — a hint for picking a sane target. */
-  hintTwd: number;
+export const CHECK_TYPE_META: Record<
+  CheckType,
+  { label: string; subtitle: string; placeholder: string; emoji: string }
+> = {
+  uptime: {
+    label: "網站正常運行監控",
+    subtitle: "Uptime monitoring",
+    placeholder: "https://example.com",
+    emoji: "🟢",
+  },
+  domain_expiry: {
+    label: "網域到期提醒",
+    subtitle: "Domain expiry alerts",
+    placeholder: "example.com",
+    emoji: "📅",
+  },
 };
 
-export const PLANS: Plan[] = [
-  { planName: "tokyo", label: "台北 ✈ 東京", route: "TPE-TYO", emoji: "🗼", hintTwd: 7182 },
-  { planName: "seoul", label: "台北 ✈ 首爾", route: "TPE-SEL", emoji: "🏙️", hintTwd: 4303 },
-];
+/** Default lead time for a new domain_expiry monitor — matches the marketing copy (30/14/7/1). */
+export const DEFAULT_THRESHOLD_DAYS = 30;
 
 /** M2 lifecycle: pending_payment -> active -> cancelled (grace) -> expired. */
 export type SubscriptionStatus = "pending_payment" | "active" | "cancelled" | "expired";
 
 export type Subscription = {
   email: string;
+  /** DynamoDB sort key attribute name is unchanged from the flight-era schema; value == target. */
   route: string;
-  plan_name: PlanName;
-  origin: string;
-  destination: string;
-  target_price: number;
-  currency: string;
+  target: string;
+  check_type: CheckType;
+  /** domain_expiry only: alert this many days before expiry. */
+  threshold?: number;
   created_at?: string;
   updated_at?: string;
-  /** Absent on legacy M1 rows — treated as pending_payment in the UI. */
+  /** Absent on legacy rows — treated as pending_payment in the UI. */
   subscription_status?: SubscriptionStatus;
   current_period_end?: string;
   current_period_end_date?: string;
@@ -83,16 +90,19 @@ export type SubscribeResult =
 
 export async function saveSubscription(input: {
   email: string;
-  planName: PlanName;
-  targetPrice: number;
+  target: string;
+  checkType: CheckType;
+  /** required for domain_expiry, ignored otherwise */
+  threshold?: number;
 }): Promise<SubscribeResult> {
   const response = await fetch(`${FLIGHT_API_BASE}/subscribe`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email: input.email,
-      plan_name: input.planName,
-      target_price: input.targetPrice,
+      target: input.target,
+      check_type: input.checkType,
+      threshold: input.threshold,
     }),
   });
   const contentType = response.headers.get("content-type") ?? "";
