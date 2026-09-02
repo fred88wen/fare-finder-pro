@@ -17,7 +17,7 @@ FUNCS = {
     "save_subscription": ["ecpay_cmv.py", "ecpay_common.py"],
     "list_subscriptions": [],
     "parser": ["subscription_gate.py"],
-    "parser_wrapper": [],
+    "parser_wrapper": ["subscription_gate.py"],
     "fare_notification": [],
     "ecpay_return": ECPAY_CALLBACK,
     "ecpay_period": ECPAY_CALLBACK,
