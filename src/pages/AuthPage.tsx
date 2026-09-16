@@ -131,12 +131,22 @@ export default function AuthPage({ mode }: { mode: Mode }) {
             </div>
 
             <div>
-              <label
-                htmlFor="password"
-                className="mb-1.5 block text-sm font-medium text-card-foreground"
-              >
-                Password / 密碼
-              </label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label
+                  htmlFor="password"
+                  className="block text-sm font-medium text-card-foreground"
+                >
+                  Password / 密碼
+                </label>
+                {mode === "sign-in" && (
+                  <Link
+                    to="/forgot-password"
+                    className="text-xs font-medium text-primary hover:text-primary/80"
+                  >
+                    忘記密碼？
+                  </Link>
+                )}
+              </div>
               <input
                 id="password"
                 type="password"

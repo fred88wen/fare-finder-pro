@@ -5,8 +5,10 @@ import { RootErrorBoundary } from "./components/RootErrorBoundary";
 import { RequireAuth } from "./components/RequireAuth";
 import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LandingPage from "./pages/LandingPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 const queryClient = new QueryClient();
 
@@ -19,6 +21,8 @@ export default function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/sign-in" element={<AuthPage mode="sign-in" />} />
             <Route path="/sign-up" element={<AuthPage mode="sign-up" />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route
               path="/app"
               element={
