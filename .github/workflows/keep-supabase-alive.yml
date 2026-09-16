@@ -1,0 +1,22 @@
+name: Keep Supabase Alive
+
+# Supabase 免費方案的專案閒置一段時間會自動暫停（連 API 網域都連不上）。
+# 這個排程定期打一次 Auth health 端點，讓 Supabase 認定為「有活動」，避免整批使用者登入失敗。
+on:
+  schedule:
+    - cron: "0 3 */3 * *" # 每 3 天一次，UTC 03:00（台北 11:00）
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Auth health endpoint
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            "https://yxbubgxrfudfpaomwccd.supabase.co/auth/v1/health")
+          echo "http_code=$code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::Supabase health check 未回 200（回 $code），專案可能已暫停或異常，請人工確認 shop.goboss.tw 登入功能。"
+          fi
