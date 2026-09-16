@@ -49,11 +49,7 @@ async function sendResetEmail(to: string, actionLink: string): Promise<void> {
   }
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405 });
-  }
-
+export async function POST(request: Request): Promise<Response> {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !RESEND_API_KEY) {
     console.error("[forgot-password] missing env vars", {
       hasUrl: !!SUPABASE_URL,
