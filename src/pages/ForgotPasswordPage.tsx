@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useDocumentMeta } from "@/lib/document-meta";
 
 export default function ForgotPasswordPage() {
@@ -17,13 +16,20 @@ export default function ForgotPasswordPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setLoading(true);
-    // 不論這個 email 是否已註冊，一律顯示同一句成功訊息——
-    // 避免有心人拿這個表單去試探哪些信箱已經有帳號。
-    await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    setLoading(false);
-    setSent(true);
+    try {
+      // 不走 Supabase 內建寄信（免費方案未設自訂 SMTP 時只寄得到專案團隊成員的信箱，
+      // 真客戶收不到），改打自己的 /api/forgot-password，用 Resend 寄中文信。
+      await fetch("/api/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+    } finally {
+      // 不論這個 email 是否已註冊、或請求本身是否成功，一律顯示同一句成功訊息——
+      // 避免有心人拿這個表單去試探哪些信箱已經有帳號，也避免暴露內部錯誤細節。
+      setLoading(false);
+      setSent(true);
+    }
   }
 
   return (
