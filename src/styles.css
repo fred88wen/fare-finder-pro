@@ -30,17 +30,22 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-ink-deep: var(--ink-deep);
   --font-sans: var(--font-family-sans);
 }
 
 :root {
   --radius: 0.75rem;
-  --font-family-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", sans-serif;
+  /* Swiss anchor: Helvetica-family grotesque for latin, matched grotesque for
+     Traditional Chinese. System faces only — no webfont, no Inter. */
+  --font-family-sans: "Helvetica Neue", Helvetica, Arial, "PingFang TC",
+    "Noto Sans TC", "Microsoft JhengHei", "微軟正黑體", ui-sans-serif, sans-serif;
 
   /* goboss.tw light theme (source: writing/scripts/design/tokens.json) */
   --background: #F8F8F6;
   --foreground: #343434;
+  /* goboss nav-ink — headline weight on the Swiss surface */
+  --ink-deep: #182737;
   --card: #FFFFFF;
   --card-foreground: #343434;
   --popover: #FFFFFF;
