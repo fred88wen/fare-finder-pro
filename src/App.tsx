@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Analytics } from "@vercel/analytics/react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { RootErrorBoundary } from "./components/RootErrorBoundary";
@@ -38,6 +39,7 @@ export default function App() {
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>
+      <Analytics />
     </RootErrorBoundary>
   );
 }
