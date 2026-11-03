@@ -1,7 +1,10 @@
 name: Keep Supabase Alive
 
 # Supabase 免費方案的專案閒置一段時間會自動暫停（連 API 網域都連不上）。
-# 這個排程定期打一次 Auth health 端點，讓 Supabase 認定為「有活動」，避免整批使用者登入失敗。
+# 2026-11-03：舊版只打 /auth/v1/health，那個端點不碰資料庫，Supabase 不算有活動，
+# 專案 9 月底照樣被暫停、會員登入壞了一個月沒人發現。
+# 改成送一次「假帳號登入」：Auth 服務必須查 auth.users 才回得出 invalid_credentials，
+# 是真的資料庫活動。預期回 400 invalid_credentials；連不上或 5xx 才算異常並讓 job 紅燈。
 on:
   schedule:
     - cron: "0 3 */3 * *" # 每 3 天一次，UTC 03:00（台北 11:00）
@@ -11,12 +14,33 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase Auth health endpoint
+      - name: 對資料庫做一次真的查詢（假帳號登入，預期 invalid_credentials）
+        id: probe
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
+          body=$(curl -s --max-time 30 -w "\n%{http_code}" -X POST \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            "https://yxbubgxrfudfpaomwccd.supabase.co/auth/v1/health")
+            -H "Content-Type: application/json" \
+            -d '{"email":"keepalive@invalid.example","password":"keepalive-probe-not-a-user"}' \
+            "https://yxbubgxrfudfpaomwccd.supabase.co/auth/v1/token?grant_type=password") || true
+          code=$(echo "$body" | tail -n1)
           echo "http_code=$code"
-          if [ "$code" != "200" ]; then
-            echo "::warning::Supabase health check 未回 200（回 $code），專案可能已暫停或異常，請人工確認 shop.goboss.tw 登入功能。"
+          if [ "$code" = "400" ] && echo "$body" | grep -q "invalid_credentials"; then
+            echo "資料庫有回應，保活成功"
+          else
+            echo "::error::Supabase 資料庫探測異常（回 ${code:-連線失敗}），專案可能已被暫停。請到 Supabase 後台按 Restore project，並確認 shop.goboss.tw 登入功能。"
+            exit 1
           fi
+
+      # 有設 Telegram 金鑰才發，沒設就略過（不影響紅燈與失敗信）
+      - name: 異常時發 Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "未設定 Telegram 金鑰，略過通知"; exit 0
+          fi
+          curl -sS -f -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=[機票比價站] Supabase 資料庫探測失敗，專案可能被暫停。請到 Supabase 後台 Restore project。" > /dev/null
