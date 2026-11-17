@@ -1,30 +1,32 @@
 name: Keep Supabase Alive
 
 # Supabase 免費方案的專案閒置一段時間會自動暫停（連 API 網域都連不上）。
-# 2026-11-03：舊版只打 /auth/v1/health，那個端點不碰資料庫，Supabase 不算有活動，
-# 專案 9 月底照樣被暫停、會員登入壞了一個月沒人發現。
-# 改成送一次「假帳號登入」：Auth 服務必須查 auth.users 才回得出 invalid_credentials，
-# 是真的資料庫活動。預期回 400 invalid_credentials；連不上或 5xx 才算異常並讓 job 紅燈。
+# 2026-11-03：舊版只打 /auth/v1/health，Supabase 不算活動，9 月底被暫停。
+# 改成「假帳號登入」後仍無效：11/7 探測成功、11/10 已被暫停（2026-11-18 查到）。
+# 2026-11-18：改成透過資料表 API 讀 public.keepalive（只有一列、只開放讀取），
+# 這是走 PostgREST 的真 SQL 查詢；頻率由每 3 天改為每天。
+# 還原：在 Supabase SQL 執行 drop table public.keepalive; 並還原本檔。
 on:
   schedule:
-    - cron: "0 3 */3 * *" # 每 3 天一次，UTC 03:00（台北 11:00）
+    - cron: "0 3 * * *" # 每天 UTC 03:00（胡志明 10:00）
   workflow_dispatch: {}
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: 對資料庫做一次真的查詢（假帳號登入，預期 invalid_credentials）
+      - name: 讀一次 keepalive 資料表（真的資料庫查詢）
         id: probe
+        env:
+          ANON: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          body=$(curl -s --max-time 30 -w "\n%{http_code}" -X POST \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"keepalive@invalid.example","password":"keepalive-probe-not-a-user"}' \
-            "https://yxbubgxrfudfpaomwccd.supabase.co/auth/v1/token?grant_type=password") || true
+          body=$(curl -s --max-time 30 -w "\n%{http_code}" \
+            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" \
+            "https://yxbubgxrfudfpaomwccd.supabase.co/rest/v1/keepalive?select=id&limit=1") || true
           code=$(echo "$body" | tail -n1)
           echo "http_code=$code"
-          if [ "$code" = "400" ] && echo "$body" | grep -q "invalid_credentials"; then
+          echo "$body" | head -n1
+          if [ "$code" = "200" ] && echo "$body" | grep -q '"id"'; then
             echo "資料庫有回應，保活成功"
           else
             echo "::error::Supabase 資料庫探測異常（回 ${code:-連線失敗}），專案可能已被暫停。請到 Supabase 後台按 Restore project，並確認 shop.goboss.tw 登入功能。"
